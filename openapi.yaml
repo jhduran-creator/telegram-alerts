@@ -45,7 +45,7 @@ servers:
   - url: http://127.0.0.1:3020
     description: |
       Desde el propio servidor. Los sistemas que viven en la misma máquina
-      (MICITT, KWebsite, Kshield…) usan esta ruta: no salen a internet y no
+      (KWebsite, Kshield, AuthO365…) usan esta ruta: no salen a internet y no
       dependen del DNS ni del certificado.
 
 security:
