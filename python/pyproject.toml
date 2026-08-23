@@ -1,0 +1,16 @@
+[project]
+name = "kuanta-alerts"
+version = "2.0.0"
+description = "Cliente del servicio central de alertas de Kuanta Bridge Group. Sin dependencias externas."
+requires-python = ">=3.9"
+dependencies = []
+
+[project.urls]
+Homepage = "https://msg.kuantabridge.com"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["kuanta_alerts"]

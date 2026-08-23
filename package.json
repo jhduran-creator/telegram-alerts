@@ -1,33 +1,20 @@
 {
-  "name": "@kmessage/telegram-alerts",
-  "version": "1.1.0",
-  "description": "Alertas por Telegram para los sistemas de Kuanta Bridge: CRITICAL inmediato, WARNING en digest, rate limiting y formato uniforme.",
+  "name": "@kuanta/alerts-client",
+  "version": "2.0.0",
+  "description": "Cliente del servicio central de alertas de Kuanta Bridge (msg.kuantabridge.com). Reemplaza a @kmessage/telegram-alerts: misma firma, sin token del bot y sin perder alertas cuando el servicio no responde.",
   "license": "MIT",
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./src/index.js",
+  "main": "./src/index.cjs",
+  "module": "./src/index.mjs",
   "exports": {
     ".": {
-      "import": "./src/index.js",
-      "require": "./dist/index.cjs",
-      "default": "./src/index.js"
+      "import": "./src/index.mjs",
+      "require": "./src/index.cjs",
+      "default": "./src/index.cjs"
     }
   },
-  "files": [
-    "src",
-    "dist",
-    "README.md"
-  ],
-  "engines": {
-    "node": ">=18"
-  },
-  "scripts": {
-    "build": "esbuild src/index.js --bundle --platform=node --target=node18 --format=cjs --outfile=dist/index.cjs",
-    "test": "node tests/dualFormat.test.cjs"
-  },
-  "devDependencies": {
-    "esbuild": "^0.23.0"
-  },
+  "files": ["src", "README.md"],
+  "engines": { "node": ">=18" },
+  "scripts": { "test": "node --test tests/*.test.js" },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/jhduran-creator/telegram-alerts.git"
