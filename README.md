@@ -33,6 +33,17 @@ Con un servicio central:
 
 ---
 
+## El contrato
+
+[`openapi.yaml`](openapi.yaml) — OpenAPI 3.1. Se importa en Postman o Insomnia y
+sirve para generar clientes. Viaja con el paquete, así que no puede quedarse
+viejo respecto de la versión que tenés instalada.
+
+No incluye las rutas de administración del servicio: no son parte de la
+integración.
+
+---
+
 ## Node
 
 ```bash

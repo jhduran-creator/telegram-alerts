@@ -1,0 +1,540 @@
+openapi: 3.1.0
+
+info:
+  title: Servicio central de alertas — Kuanta Bridge
+  version: "2.0.0"
+  summary: Alertas operativas a Telegram, con entrega verificable
+  description: |
+    Un solo proceso habla con Telegram. Los sistemas mandan un `POST` y siguen
+    trabajando.
+
+    ## Lo que hay que entender antes de integrar
+
+    **El `202` no significa "está en el chat".** Significa recibida y aceptada.
+    La entrega es asíncrona a propósito: tu sistema no espera a Telegram. Para
+    saber si llegó de verdad, consultá el `id` que devuelve la respuesta.
+
+    **El nombre del sistema lo define la API key**, no un campo del cuerpo. Con
+    el paquete anterior había que pasarlo en cada arranque y era posible
+    olvidarlo o poner el de otro sistema — una alerta firmada mal manda a
+    buscar el problema donde no está.
+
+    **Nada se pierde si Telegram falla.** Hay cola con reintentos hasta 24
+    horas y respaldo en disco.
+
+    **Todo se sanitiza antes de salir.** El chat está fuera del control de
+    acceso de los productos: correos, teléfonos, UUIDs y credenciales se
+    enmascaran para todos los sistemas por igual.
+
+    ## Este contrato no lo publica el servicio
+
+    Es un archivo que se entrega a cada equipo junto con su API key. El
+    servicio no expone ningún endpoint de documentación: publicar el mapa de
+    rutas de una API cerrada solo le sirve a quien la esté sondeando.
+
+    Se puede importar en Postman o Insomnia, y sirve para generar clientes.
+
+  contact:
+    name: Julio Hidalgo — Kuanta Bridge Group
+  license:
+    name: Uso interno
+
+servers:
+  - url: https://msg.kuantabridge.com
+    description: Producción
+  - url: http://127.0.0.1:3020
+    description: |
+      Desde el propio servidor. Los sistemas que viven en la misma máquina
+      (MICITT, KWebsite, Kshield…) usan esta ruta: no salen a internet y no
+      dependen del DNS ni del certificado.
+
+security:
+  - ApiKey: []
+
+tags:
+  - name: Alertas
+    description: Mandar alertas
+  - name: Verificación
+    description: |
+      Comprobar que una alerta llegó al chat. Es la parte que no tenía el
+      paquete anterior: poder demostrar la entrega en vez de suponerla.
+  - name: Estado
+    description: Salud del servicio y configuración
+paths:
+  /v1/alerts:
+    post:
+      tags: [Alertas]
+      summary: Mandar una alerta
+      operationId: enviarAlerta
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Alerta' }
+            examples:
+              critico:
+                summary: CRITICAL — sale al instante
+                value:
+                  id: 9f1c8e2a-4b3d-4f7a-9c11-2e5d8a0b7c43
+                  severity: CRITICAL
+                  category: payments
+                  message: La pasarela rechazó 12 cobros seguidos con error 502
+                  tenant: acme
+                  host: payroll-prod-01
+              cron:
+                summary: WARNING de un cron, con freno por clave
+                description: |
+                  `throttleKey` agrupa mensajes *distintos* del mismo problema.
+                  Un sweep que corre cada 5 minutos sobre todos los tenants
+                  mandaría 288 alertas al día por un solo fallo sistémico; con
+                  la clave manda una por hora.
+                value:
+                  severity: WARNING
+                  category: cron
+                  message: 'SweepCumplimiento: fallaron 3 de 47 — columna inexistente'
+                  throttleKey: cron:SweepCumplimiento
+              minimo:
+                summary: Lo mínimo que se puede mandar
+                value:
+                  message: El respaldo de PostgreSQL falló
+      responses:
+        '202':
+          description: Recibida. **No significa que ya esté en el chat**
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RespuestaAlerta' }
+              examples:
+                encolada:
+                  summary: CRITICAL, va camino a Telegram
+                  value: { id: 9f1c8e2a-4b3d-4f7a-9c11-2e5d8a0b7c43, source: Payroll360, accion: encolada }
+                digest:
+                  summary: WARNING, espera el resumen
+                  value: { id: 3a7b…, source: Payroll360, accion: en digest, saleEn: el próximo resumen }
+                silenciada:
+                  summary: Duplicada — no es un error
+                  value: { id: 5c2d…, source: Payroll360, accion: silenciada, motivo: duplicada }
+                idempotente:
+                  summary: Reintento con el mismo `id`
+                  value: { id: 9f1c8e2a-…, accion: entregada, motivo: ya procesada (idempotencia), duplicada: true }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '401': { $ref: '#/components/responses/SinCredencial' }
+        '413': { $ref: '#/components/responses/Grande' }
+        '429': { $ref: '#/components/responses/Limite' }
+
+    get:
+      tags: [Verificación]
+      summary: Últimas alertas de tu sistema y su estado
+      operationId: listarAlertas
+      parameters:
+        - name: limite
+          in: query
+          schema: { type: integer, default: 50, maximum: 500 }
+        - name: estado
+          in: query
+          description: Filtra por estado
+          schema: { $ref: '#/components/schemas/Estado' }
+        - name: desde
+          in: query
+          description: Epoch en milisegundos
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Cada sistema ve solo las suyas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  alertas:
+                    type: array
+                    items: { $ref: '#/components/schemas/AlertaRegistrada' }
+        '401': { $ref: '#/components/responses/SinCredencial' }
+
+  /v1/alerts/{id}:
+    get:
+      tags: [Verificación]
+      summary: El comprobante de una alerta
+      description: |
+        `telegramMessageId` es el número que asignó Telegram al mensaje en el
+        chat. Es el único comprobante real de que existe.
+
+        Un sistema solo ve sus propias alertas: con la key de otro, el mismo id
+        devuelve `404`.
+      operationId: consultarAlerta
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Estado y comprobante
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comprobante' }
+              examples:
+                entregada:
+                  value:
+                    id: 9f1c8e2a-4b3d-4f7a-9c11-2e5d8a0b7c43
+                    estado: entregada
+                    entregada: true
+                    telegramMessageId: 4821
+                    recibidaEn: '2026-08-22T17:03:24.000Z'
+                    entregadaEn: '2026-08-22T17:03:24.812Z'
+                    intentos: 1
+                    severity: CRITICAL
+                    category: payments
+                    motivo: null
+                enCamino:
+                  summary: Telegram no responde — se sigue reintentando
+                  value:
+                    id: 3a7b…
+                    estado: encolada
+                    entregada: false
+                    telegramMessageId: null
+                    intentos: 3
+                    motivo: null
+        '401': { $ref: '#/components/responses/SinCredencial' }
+        '404':
+          description: No existe, o es de otro sistema
+
+  /v1/verify:
+    get:
+      tags: [Verificación]
+      summary: ¿Se está entregando todo?
+      description: |
+        `sinEntregar` es el número que importa. Unas pocas son normales —son
+        `WARNING` esperando el resumen—. Si crece y no baja, algo no está
+        saliendo al chat.
+      operationId: resumenEntregas
+      parameters:
+        - name: desde
+          in: query
+          description: Epoch en milisegundos. Por defecto, las últimas 24 horas
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ResumenEntregas' }
+        '401': { $ref: '#/components/responses/SinCredencial' }
+
+  /v1/alerts/batch:
+    post:
+      tags: [Alertas]
+      summary: Varias alertas de una
+      description: |
+        Lo usan los clientes oficiales para vaciar su buffer local cuando el
+        servicio vuelve de estar caído. Una alerta mal formada no tumba el
+        lote: se procesa lo que sirve y se reporta el resto.
+      operationId: enviarLote
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [alerts]
+              properties:
+                alerts:
+                  type: array
+                  maxItems: 200
+                  items: { $ref: '#/components/schemas/Alerta' }
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: { type: string }
+                  recibidas: { type: integer }
+                  rechazadas: { type: integer }
+                  resultados:
+                    type: array
+                    items: { $ref: '#/components/schemas/RespuestaAlerta' }
+        '400': { $ref: '#/components/responses/Invalida' }
+        '401': { $ref: '#/components/responses/SinCredencial' }
+
+  /v1/alerts/test:
+    post:
+      tags: [Alertas]
+      summary: Mensaje de prueba al chat
+      description: |
+        Salta todos los frenos: se pide a propósito.
+
+        **Avisá antes de correrlo.** El chat es compartido y un mensaje de
+        prueba se confunde fácil con un incidente real.
+      operationId: alertaDePrueba
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                host: { type: string }
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: { type: string }
+                  accion: { type: string, examples: [encolada] }
+        '401': { $ref: '#/components/responses/SinCredencial' }
+
+  /v1/status:
+    get:
+      tags: [Estado]
+      summary: Cómo está configurado tu sistema
+      operationId: estadoDelCliente
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  source: { type: string, description: El nombre con el que se firman tus alertas }
+                  habilitado: { type: boolean }
+                  sanitiza: { type: boolean }
+                  canal: { type: string, enum: [compartido, propio] }
+                  dedupSegundos: { type: integer }
+                  frenoMinutosDefault: { type: integer }
+                  digestSegundos: { type: integer }
+                  problemasDeConfiguracion:
+                    type: array
+                    items: { type: string }
+        '401': { $ref: '#/components/responses/SinCredencial' }
+
+  /healthz:
+    get:
+      tags: [Estado]
+      summary: Salud del servicio
+      description: |
+        **Sin autenticación** — lo consultan systemd y el monitoreo externo,
+        que no pueden llevar credenciales.
+
+        Dice lo mínimo a propósito: en un host público es lo único legible sin
+        key, y el detalle le dibujaría el mapa a quien esté mirando. Con
+        `X-Admin-Key` sale todo.
+
+        Devuelve `503` si el servicio no puede trabajar o si la cola lleva más
+        de 15 minutos atascada. Un healthcheck que siempre dice 200 no sirve.
+      operationId: salud
+      security: []
+      responses:
+        '200':
+          description: Funcionando
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  estado: { type: string, enum: [ok] }
+        '503':
+          description: Mal configurado o degradado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  estado: { type: string, enum: [mal configurado, degradado] }
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: http
+      scheme: bearer
+      description: |
+        `Authorization: Bearer ka_tusistema_…`
+
+        También se acepta `X-Api-Key`.
+
+        **La key define el nombre del sistema en el chat.** Quien la tenga
+        puede publicar mensajes firmados con tu nombre: tratala como una
+        contraseña. Va en el `.env` del servidor, nunca en el repositorio.
+
+        Del lado del servicio no se guarda la key, solo su hash.
+  schemas:
+    Severidad:
+      type: string
+      enum: [CRITICAL, WARNING, INFO, HEARTBEAT]
+      default: WARNING
+      description: |
+        - `CRITICAL` — sale al instante. Algo está roto y alguien tiene que actuar ahora.
+        - `WARNING` — se acumula y sale en el resumen de 15 minutos.
+        - `INFO` — nunca sale al chat. Existe para no borrar la llamada del código.
+        - `HEARTBEAT` — sale al instante, con formato propio. El latido de "sigo vivo".
+
+        La pregunta para elegir: *¿justifica interrumpir a alguien ahora mismo?*
+        Si la respuesta es no, es `WARNING`. Un canal donde todo es crítico se
+        termina silenciando, y ese es el peor resultado posible.
+
+    Estado:
+      type: string
+      enum: [recibida, encolada, en_digest, entregada, silenciada, registrada, descartada]
+      description: |
+        - `entregada` — está en el chat. Lleva `telegramMessageId`.
+        - `encolada` — va en camino. Si Telegram falla, se reintenta hasta 24 h.
+        - `en_digest` — es un `WARNING` esperando el resumen. No se perdió.
+        - `silenciada` — freno o duplicado, a propósito. `motivo` lo dice.
+        - `registrada` — era `INFO`.
+        - `descartada` — no se pudo entregar. `motivo` explica qué pasó.
+
+    Alerta:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+          description: |
+            Qué pasó, en una línea.
+
+            **Nunca pases un objeto acá.** Un objeto interpolado llega como
+            `"[object Object]"` y la alerta queda sin información. Pasó el
+            2026-08-13 y el error real se perdió para siempre. Usá
+            `err.message`, no `err`.
+          examples: ['La pasarela rechazó 12 cobros seguidos con error 502']
+        severity: { $ref: '#/components/schemas/Severidad' }
+        category:
+          type: string
+          maxLength: 40
+          default: internal
+          description: |
+            Texto libre y corto; aparece como "Tipo". Los que ya se usan:
+            `payments`, `meta`, `broker`, `job`, `cron`, `internal`,
+            `database`, `rls`, `backup`, `aws`, `systemd`. Si ninguno encaja,
+            poné el tuyo — mejor uno propio que forzar el ajeno.
+          examples: [payments]
+        id:
+          type: string
+          description: |
+            Identificador propio, para idempotencia. Si repetís la petición con
+            el mismo `id`, el servicio devuelve el resultado de la primera sin
+            volver a publicar nada.
+
+            **Por qué importa:** "no recibí respuesta" no significa "no llegó".
+            El POST pudo procesarse y perderse la respuesta de vuelta. Sin el
+            `id`, cada corte de red duplicaría alertas justo durante un
+            incidente.
+
+            Los clientes oficiales lo generan solos.
+          examples: [9f1c8e2a-4b3d-4f7a-9c11-2e5d8a0b7c43]
+        tenant:
+          type: string
+          maxLength: 80
+          description: El **slug**, nunca el nombre comercial ni el id
+          examples: [acme]
+        stack:
+          type: string
+          description: Solo para `CRITICAL`. Se recorta y se sanitiza
+        host:
+          type: string
+          maxLength: 80
+          description: Dónde pasó. Si falta, lo pone el servicio
+        throttleKey:
+          type: string
+          maxLength: 120
+          description: |
+            Agrupa mensajes *distintos* del mismo problema. Distinto de la
+            deduplicación automática, que solo tapa el mensaje idéntico.
+          examples: [cron:SweepCumplimiento]
+        throttleMinutes:
+          type: integer
+          minimum: 0
+          default: 60
+          description: Ventana del freno. `0` lo apaga — útil durante un incidente
+        timestamp:
+          type: integer
+          format: int64
+          description: Epoch en ms. Por defecto, cuando llegó
+
+    RespuestaAlerta:
+      type: object
+      properties:
+        id: { type: string, format: uuid, description: Con esto se consulta si llegó }
+        source: { type: string, description: Sale de la API key }
+        accion:
+          type: string
+          enum: [encolada, en digest, silenciada, registrada, descartada, entregada]
+        motivo: { type: string, nullable: true }
+        duplicada: { type: boolean, description: Presente solo si el `id` ya se había procesado }
+
+    AlertaRegistrada:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        ts: { type: string, format: date-time }
+        severity: { $ref: '#/components/schemas/Severidad' }
+        category: { type: string }
+        message: { type: string }
+        estado: { $ref: '#/components/schemas/Estado' }
+        telegramMessageId: { type: integer, nullable: true }
+        motivo: { type: string, nullable: true }
+
+    Comprobante:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        estado: { $ref: '#/components/schemas/Estado' }
+        entregada: { type: boolean }
+        telegramMessageId:
+          type: integer
+          nullable: true
+          description: El número que asignó Telegram. El comprobante
+        recibidaEn: { type: string, format: date-time }
+        entregadaEn: { type: string, format: date-time, nullable: true }
+        intentos: { type: integer }
+        severity: { $ref: '#/components/schemas/Severidad' }
+        category: { type: string }
+        motivo: { type: string, nullable: true }
+
+    ResumenEntregas:
+      type: object
+      properties:
+        desde: { type: string, format: date-time }
+        recibidas: { type: integer }
+        entregadas: { type: integer }
+        enCamino: { type: integer }
+        enDigest: { type: integer }
+        silenciadas: { type: integer }
+        registradas: { type: integer }
+        descartadas: { type: integer }
+        sinEntregar:
+          type: integer
+          description: Lo que se quiso mandar y todavía no está en el chat. **El número que importa**
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+  responses:
+    Invalida:
+      description: Falta `message`, la severidad no existe, o el JSON está roto
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            sinMensaje: { value: { error: falta message } }
+            severidad: { value: { error: 'severity inválida: "URGENTE". Válidas: CRITICAL, WARNING, INFO, HEARTBEAT' } }
+    SinCredencial:
+      description: Sin API key, o la key no vale
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { error: credencial inválida }
+    Grande:
+      description: El cuerpo pasa de 64 KB
+    Limite:
+      description: |
+        Demasiadas peticiones (60/min por sistema), o demasiados intentos
+        fallidos de autenticación — tras 10 fallos la IP queda bloqueada 15
+        minutos.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
