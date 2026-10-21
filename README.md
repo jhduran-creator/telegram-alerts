@@ -3,8 +3,10 @@
 Alertas por Telegram para los sistemas de Kuanta Bridge. Un solo canal, varios sistemas, cada uno identificado por su nombre.
 
 ```bash
-npm install git+https://github.com/jhduran-creator/telegram-alerts.git
+npm install git+https://github.com/jhduran-creator/telegram-alerts.git#v1.2.0
 ```
+
+La línea 1.x (este paquete, que manda directo a Telegram) vive en la rama `v1` con sus tags (`v1.1.0`, `v1.2.0`). `main` es la 2.x, cliente del servicio central de alertas.
 
 ESM y CommonJS · sin dependencias en runtime · Node 18+
 
@@ -32,7 +34,7 @@ No es un `sendMessage` a Telegram. El paquete resuelve cuatro cosas que, hechas 
 El paquete no tiene dependencias externas — solo módulos nativos de Node. Funciona en Node 18 o superior, con ESM (`"type": "module"`).
 
 ```bash
-npm install git+https://github.com/jhduran-creator/telegram-alerts.git
+npm install git+https://github.com/jhduran-creator/telegram-alerts.git#v1.2.0
 ```
 
 Funciona en **ESM y en CommonJS**. En un proyecto NestJS o en cualquier código que compile a CJS, el `require()` resuelve el build de `dist/` y los ejemplos de esta guía funcionan tal cual, sin import dinámico.
@@ -123,6 +125,8 @@ await sendAlert({
 | `CRITICAL` | Sale **al instante** | Algo está roto y alguien tiene que actuar ahora |
 | `WARNING` | Se acumula y sale en el resumen | Algo anda mal pero puede esperar 15 minutos |
 | `INFO` | **No se envía nunca** | Existe para no tener que sacar la llamada del código |
+| `HEARTBEAT` | Sale **al instante**, en verde | El latido diario: si deja de llegar, algo se rompió |
+| `REPORT` (1.2.0) | Sale **al instante**, tal cual: la primera línea en negrita y la firma del sistema al pie, sin «WARNING DIGEST» ni Tipo/Host | Un reporte programado para leer (por ejemplo, la revisión nocturna de fidelidad) |
 
 La pregunta para elegir: *¿justifica interrumpir a alguien ahora mismo?* Si la respuesta es no, es `WARNING`. Un canal donde todo es crítico se termina silenciando, y ese es el peor resultado posible.
 

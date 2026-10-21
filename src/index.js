@@ -10,7 +10,7 @@
 
 import { sendTelegramMessage } from './telegramClient.js'
 import { shouldSend, startCleanup, stopCleanup } from './rateLimiter.js'
-import { formatCritical, formatDigest, formatTest } from './formatter.js'
+import { formatCritical, formatDigest, formatTest, formatHeartbeat, formatReport } from './formatter.js'
 import { addWarning, startDigest, stopDigest, flushNow } from './digestBuffer.js'
 
 let config = {
@@ -82,7 +82,8 @@ export function initTelegramAlerts(options = {}) {
 /**
  * Send an alert
  * @param {Object} alert
- * @param {string} alert.severity - 'CRITICAL' | 'WARNING' | 'INFO'
+ * @param {string} alert.severity - 'CRITICAL' | 'WARNING' | 'INFO' | 'HEARTBEAT' | 'REPORT' (el mensaje es el
+ *   reporte entero, con su título en la primera línea: sale al instante y sin envoltorio; ver formatReport)
  * @param {string} alert.category - 'database' | 'llm' | 'meta' | 'payment' | 'email' | 'job' | 'websocket' | 'internal'
  * @param {string} alert.message - Error description
  * @param {string} [alert.tenant] - Tenant name (optional)
@@ -115,6 +116,29 @@ export async function sendAlert({ severity = 'WARNING', category = 'internal', m
   if (!config.enabled || !initialized) return
   if (!message) return
   message = normalizarMensaje(message)
+
+  // HEARTBEAT: sale al instante como un CRITICAL, pero con su propio formato. Ver
+  // formatHeartbeat() — un mensaje de "todo bien" en rojo entrena a ignorar los rojos.
+  // No pasa por el rate limiter: es diario y no puede perderse por deduplicación.
+  if (severity === 'HEARTBEAT') {
+    try {
+      await sendTelegramMessage(config.token, config.chatId, formatHeartbeat({ source: config.source, message }))
+    } catch (err) {
+      // Silent fail — alerting should never break the app
+    }
+    return
+  }
+
+  // REPORT: un resumen que ya viene escrito para leerse (título y color en la primera línea). Sale al
+  // instante, sin el envoltorio de CRITICAL ni el digest, y sin rate limiter: es programado, no se repite.
+  if (severity === 'REPORT') {
+    try {
+      await sendTelegramMessage(config.token, config.chatId, formatReport({ source: config.source, message }))
+    } catch (err) {
+      // Silent fail — alerting should never break the app
+    }
+    return
+  }
 
   // INFO level: never sent to Telegram
   if (severity === 'INFO') return

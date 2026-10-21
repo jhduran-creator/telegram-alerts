@@ -140,7 +140,7 @@ function formatCritical({ source, category, message, tenant, stack, timestamp })
 }
 function formatDigest(items, source) {
   if (!items || items.length === 0) return null;
-  let msg = `\u{1F7E1} *WARNING DIGEST* \\(${items.length} alerta${items.length > 1 ? "s" : ""}\\)
+  let msg = `\u{1F7E1} *WARNING DIGEST* \\| ${esc(source)} \\(${items.length} alerta${items.length > 1 ? "s" : ""}\\)
 `;
   msg += `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 `;
@@ -152,6 +152,7 @@ function formatDigest(items, source) {
       minute: "2-digit"
     });
     msg += `${i + 1}\\. \\[${esc(item.category)}\\] ${esc(item.message)}`;
+    if (item.source && item.source !== source) msg += ` \\| _${esc(item.source)}_`;
     if (item.tenant) msg += ` \\| ${esc(item.tenant)}`;
     msg += ` \u2014 _${esc(time)}_
 `;
@@ -160,6 +161,29 @@ function formatDigest(items, source) {
     msg += `
 _\\.\\.\\.y ${items.length - 20} m\xE1s_`;
   }
+  return msg;
+}
+function formatHeartbeat({ source, message, timestamp }) {
+  const time = timestamp || (/* @__PURE__ */ new Date()).toLocaleString("es-CR", { timeZone: "America/Costa_Rica" });
+  let msg = `\u{1F49A} *Latido diario* \\| ${esc(source)}
+`;
+  msg += `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
+`;
+  msg += `${esc(message)}
+`;
+  msg += `*Hora:* ${esc(time)}
+`;
+  msg += `*Host:* ${esc(import_os.default.hostname())}`;
+  return msg;
+}
+function formatReport({ source, message }) {
+  const [titulo, ...resto] = String(message).split("\n");
+  let msg = `*${esc(titulo)}*`;
+  if (resto.length) msg += `
+${esc(resto.join("\n"))}`;
+  msg += `
+
+_\u2014 ${esc(source)}_`;
   return msg;
 }
 function formatTest(source) {
@@ -290,6 +314,20 @@ async function sendAlert({ severity = "WARNING", category = "internal", message,
   if (!config.enabled || !initialized) return;
   if (!message) return;
   message = normalizarMensaje(message);
+  if (severity === "HEARTBEAT") {
+    try {
+      await sendTelegramMessage(config.token, config.chatId, formatHeartbeat({ source: config.source, message }));
+    } catch (err) {
+    }
+    return;
+  }
+  if (severity === "REPORT") {
+    try {
+      await sendTelegramMessage(config.token, config.chatId, formatReport({ source: config.source, message }));
+    } catch (err) {
+    }
+    return;
+  }
   if (severity === "INFO") return;
   if (severity === "WARNING") {
     addWarning({ category, message, tenant, source: config.source });
