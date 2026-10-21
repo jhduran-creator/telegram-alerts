@@ -12,6 +12,16 @@ function esc(text) {
   return String(text).replace(ESCAPE_CHARS, '\\$1')
 }
 
+// Telegram rechaza entero un mensaje de más de 4096 caracteres («message is too long», 19/10/2026: se perdió un
+// digest completo de KAssistant). Cada formato queda debajo de LIMITE; se recorta el texto ANTES de escaparlo para
+// no partir un escape de MarkdownV2 (un «\\» suelto al final también lo rechaza Telegram).
+export const LIMITE = 4000
+
+function recortar(text, max) {
+  const t = String(text ?? '')
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t
+}
+
 /**
  * Format a CRITICAL alert message
  */
@@ -21,7 +31,7 @@ export function formatCritical({ source, category, message, tenant, stack, times
 
   let msg = `🔴 *CRITICAL* \\| ${esc(source)}\n`
   msg += `━━━━━━━━━━━━━━━━━━\n`
-  msg += `*Error:* ${esc(message)}\n`
+  msg += `*Error:* ${esc(recortar(message, 1500))}\n`
   msg += `*Tipo:* ${esc(category)}\n`
   if (tenant) msg += `*Tenant:* ${esc(tenant)}\n`
   msg += `*Hora:* ${esc(time)}\n`
@@ -48,6 +58,9 @@ export function formatDigest(items, source) {
   let msg = `🟡 *WARNING DIGEST* \\| ${esc(source)} \\(${items.length} alerta${items.length > 1 ? 's' : ''}\\)\n`
   msg += `━━━━━━━━━━━━━━━━━━\n`
 
+  // Hasta 20 líneas de 300 caracteres, y solo las que entran debajo de LIMITE; el resto se cuenta.
+  const cierre = (n) => `\n_\\.\\.\\.y ${n} más_`
+  let incluidas = 0
   for (let i = 0; i < Math.min(items.length, 20); i++) {
     const item = items[i]
     const time = new Date(item.timestamp || Date.now()).toLocaleTimeString('es-CR', {
@@ -55,15 +68,18 @@ export function formatDigest(items, source) {
       hour: '2-digit',
       minute: '2-digit'
     })
-    msg += `${i + 1}\\. \\[${esc(item.category)}\\] ${esc(item.message)}`
+    let linea = `${i + 1}\\. \\[${esc(item.category)}\\] ${esc(recortar(item.message, 300))}`
     // Solo si difiere del encabezado: un buffer es por proceso, así que normalmente coinciden.
-    if (item.source && item.source !== source) msg += ` \\| _${esc(item.source)}_`
-    if (item.tenant) msg += ` \\| ${esc(item.tenant)}`
-    msg += ` — _${esc(time)}_\n`
+    if (item.source && item.source !== source) linea += ` \\| _${esc(item.source)}_`
+    if (item.tenant) linea += ` \\| ${esc(item.tenant)}`
+    linea += ` — _${esc(time)}_\n`
+    if (msg.length + linea.length + cierre(items.length).length > LIMITE) break
+    msg += linea
+    incluidas++
   }
 
-  if (items.length > 20) {
-    msg += `\n_\\.\\.\\.y ${items.length - 20} más_`
+  if (items.length > incluidas) {
+    msg += cierre(items.length - incluidas)
   }
 
   return msg
@@ -100,10 +116,17 @@ export function formatHeartbeat({ source, message, timestamp }) {
  */
 export function formatReport({ source, message }) {
   const [titulo, ...resto] = String(message).split('\n')
-  let msg = `*${esc(titulo)}*`
-  if (resto.length) msg += `\n${esc(resto.join('\n'))}`
-  msg += `\n\n_— ${esc(source)}_`
-  return msg
+  const pie = `\n\n_— ${esc(source)}_`
+  let msg = `*${esc(recortar(titulo, 200))}*`
+  // El cuerpo entra por líneas enteras mientras quepa; lo que no, se avisa (el detalle sigue en la app).
+  let cuerpo = ''
+  for (let i = 0; i < resto.length; i++) {
+    const linea = `\n${esc(recortar(resto[i], 1000))}`
+    const aviso = `\n_${esc(`…y ${resto.length - i} línea(s) más`)}_`
+    if (msg.length + cuerpo.length + linea.length + aviso.length + pie.length > LIMITE) { cuerpo += aviso; break }
+    cuerpo += linea
+  }
+  return msg + cuerpo + pie
 }
 
 /**

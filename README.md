@@ -3,10 +3,10 @@
 Alertas por Telegram para los sistemas de Kuanta Bridge. Un solo canal, varios sistemas, cada uno identificado por su nombre.
 
 ```bash
-npm install git+https://github.com/jhduran-creator/telegram-alerts.git#v1.2.0
+npm install git+https://github.com/jhduran-creator/telegram-alerts.git#v1.2.1
 ```
 
-La línea 1.x (este paquete, que manda directo a Telegram) vive en la rama `v1` con sus tags (`v1.1.0`, `v1.2.0`). `main` es la 2.x, cliente del servicio central de alertas.
+La línea 1.x (este paquete, que manda directo a Telegram) vive en la rama `v1` con sus tags (`v1.1.0`, `v1.2.0`, `v1.2.1`). `main` es la 2.x, cliente del servicio central de alertas.
 
 ESM y CommonJS · sin dependencias en runtime · Node 18+
 
@@ -25,6 +25,7 @@ No es un `sendMessage` a Telegram. El paquete resuelve cuatro cosas que, hechas 
 - **Separa lo urgente de lo acumulable.** Un `CRITICAL` sale al instante; los `WARNING` se juntan y salen en un resumen cada 15 minutos, para no inundar el chat.
 - **Evita la alerta repetida.** El mismo error no vuelve a mandarse durante 5 minutos. Sin esto, un fallo en un bucle publica cientos de mensajes y el canal se vuelve inútil justo cuando lo necesitás.
 - **Formatea igual para todos**, con hora de Costa Rica y el host que la emitió.
+- **Ningún mensaje pasa el límite de Telegram** (4096 caracteres; desde 1.2.1). El digest manda las líneas que caben y cuenta las demás («…y N más»), un CRITICAL recorta el error a 1500 caracteres y un REPORT entra por líneas enteras y conserva la firma. Antes, un mensaje largo se perdía entero.
 - **Nunca rompe tu aplicación.** Si Telegram falla, o falta configuración, la llamada no lanza excepción: sigue de largo en silencio.
 
 ---
@@ -34,7 +35,7 @@ No es un `sendMessage` a Telegram. El paquete resuelve cuatro cosas que, hechas 
 El paquete no tiene dependencias externas — solo módulos nativos de Node. Funciona en Node 18 o superior, con ESM (`"type": "module"`).
 
 ```bash
-npm install git+https://github.com/jhduran-creator/telegram-alerts.git#v1.2.0
+npm install git+https://github.com/jhduran-creator/telegram-alerts.git#v1.2.1
 ```
 
 Funciona en **ESM y en CommonJS**. En un proyecto NestJS o en cualquier código que compile a CJS, el `require()` resuelve el build de `dist/` y los ejemplos de esta guía funcionan tal cual, sin import dinámico.

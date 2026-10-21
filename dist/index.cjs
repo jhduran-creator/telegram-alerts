@@ -113,6 +113,11 @@ function esc(text) {
   if (!text) return "";
   return String(text).replace(ESCAPE_CHARS, "\\$1");
 }
+var LIMITE = 4e3;
+function recortar(text, max) {
+  const t = String(text ?? "");
+  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
+}
 function formatCritical({ source, category, message, tenant, stack, timestamp }) {
   const time = timestamp || (/* @__PURE__ */ new Date()).toLocaleString("es-CR", { timeZone: "America/Costa_Rica" });
   const host = import_os.default.hostname();
@@ -120,7 +125,7 @@ function formatCritical({ source, category, message, tenant, stack, timestamp })
 `;
   msg += `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 `;
-  msg += `*Error:* ${esc(message)}
+  msg += `*Error:* ${esc(recortar(message, 1500))}
 `;
   msg += `*Tipo:* ${esc(category)}
 `;
@@ -144,6 +149,9 @@ function formatDigest(items, source) {
 `;
   msg += `\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501
 `;
+  const cierre = (n) => `
+_\\.\\.\\.y ${n} m\xE1s_`;
+  let incluidas = 0;
   for (let i = 0; i < Math.min(items.length, 20); i++) {
     const item = items[i];
     const time = new Date(item.timestamp || Date.now()).toLocaleTimeString("es-CR", {
@@ -151,15 +159,17 @@ function formatDigest(items, source) {
       hour: "2-digit",
       minute: "2-digit"
     });
-    msg += `${i + 1}\\. \\[${esc(item.category)}\\] ${esc(item.message)}`;
-    if (item.source && item.source !== source) msg += ` \\| _${esc(item.source)}_`;
-    if (item.tenant) msg += ` \\| ${esc(item.tenant)}`;
-    msg += ` \u2014 _${esc(time)}_
+    let linea = `${i + 1}\\. \\[${esc(item.category)}\\] ${esc(recortar(item.message, 300))}`;
+    if (item.source && item.source !== source) linea += ` \\| _${esc(item.source)}_`;
+    if (item.tenant) linea += ` \\| ${esc(item.tenant)}`;
+    linea += ` \u2014 _${esc(time)}_
 `;
+    if (msg.length + linea.length + cierre(items.length).length > LIMITE) break;
+    msg += linea;
+    incluidas++;
   }
-  if (items.length > 20) {
-    msg += `
-_\\.\\.\\.y ${items.length - 20} m\xE1s_`;
+  if (items.length > incluidas) {
+    msg += cierre(items.length - incluidas);
   }
   return msg;
 }
@@ -178,13 +188,23 @@ function formatHeartbeat({ source, message, timestamp }) {
 }
 function formatReport({ source, message }) {
   const [titulo, ...resto] = String(message).split("\n");
-  let msg = `*${esc(titulo)}*`;
-  if (resto.length) msg += `
-${esc(resto.join("\n"))}`;
-  msg += `
+  const pie = `
 
 _\u2014 ${esc(source)}_`;
-  return msg;
+  let msg = `*${esc(recortar(titulo, 200))}*`;
+  let cuerpo = "";
+  for (let i = 0; i < resto.length; i++) {
+    const linea = `
+${esc(recortar(resto[i], 1e3))}`;
+    const aviso = `
+_${esc(`\u2026y ${resto.length - i} l\xEDnea(s) m\xE1s`)}_`;
+    if (msg.length + cuerpo.length + linea.length + aviso.length + pie.length > LIMITE) {
+      cuerpo += aviso;
+      break;
+    }
+    cuerpo += linea;
+  }
+  return msg + cuerpo + pie;
 }
 function formatTest(source) {
   const time = (/* @__PURE__ */ new Date()).toLocaleString("es-CR", { timeZone: "America/Costa_Rica" });

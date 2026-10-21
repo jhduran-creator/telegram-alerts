@@ -1,6 +1,6 @@
 {
   "name": "@kmessage/telegram-alerts",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Alertas por Telegram para los sistemas de Kuanta Bridge: CRITICAL inmediato, WARNING en digest, rate limiting y formato uniforme.",
   "license": "MIT",
   "type": "module",
@@ -23,7 +23,7 @@
   },
   "scripts": {
     "build": "esbuild src/index.js --bundle --platform=node --target=node18 --format=cjs --outfile=dist/index.cjs",
-    "test": "node tests/dualFormat.test.cjs && node --test tests/formatReport.test.mjs"
+    "test": "node tests/dualFormat.test.cjs && node --test tests/formatReport.test.mjs tests/limite.test.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.23.0"
